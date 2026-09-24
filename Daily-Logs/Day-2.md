@@ -1,4 +1,4 @@
-*Date:** 2026-09-21 -> 2026-09-24
+*Date: 2026-09-21 -> 2026-09-24
 
 **Project:** NetRecon — Network Reconnaissance Toolkit
 **Module Completed:** `scanner/target.py`
