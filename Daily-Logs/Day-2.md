@@ -1,410 +1,166 @@
-*Date: 2026-09-21 -> 2026-09-24
+# 20/09/2026 - 24/09/2026
 
 **Project:** NetRecon — Network Reconnaissance Toolkit
 **Module Completed:** `scanner/target.py`
 
 ## Session Summary
 
-Completed the `scanner/target.py` module, which is responsible for accepting, validating, normalising, and expanding reconnaissance targets.
-
-The module now supports individual IPv4/IPv6 addresses, CIDR networks, and IPv4/IPv6 address ranges while using lazy generation to avoid unnecessarily creating large target lists in memory.
-
-The completed module was tested against valid targets, invalid targets, IPv4/IPv6 combinations, CIDR networks, and edge cases before being committed and pushed to GitHub.
-
----
+Completed the `scanner/target.py` module for NetRecon. The module is responsible for accepting, validating, parsing, and expanding different types of network targets into individual IP addresses that can later be passed to the scanning components.
 
 ## Work Completed
 
-### 1. Target Input and Validation
+### Target Input and Validation
 
-Improved `get_target()` so that user input is:
+Implemented `get_target()` to continuously request a target from the user until valid input is provided.
 
-1. Read from the terminal.
-2. Stripped of leading/trailing whitespace.
-3. Attempted as an individual IP address.
-4. Attempted as a CIDR network if that fails.
-5. Attempted as an IP range if that also fails.
-6. Rejected with an error message if all parsing attempts fail.
+The function supports:
 
-The raw user input is now stored separately as:
+* Individual IPv4 addresses
+* Individual IPv6 addresses
+* IPv4 CIDR networks
+* IPv6 CIDR networks
+* IPv4 address ranges
+* IPv6 address ranges
 
-```python
-raw_target = input("Enter target: ").strip()
-```
+Invalid input is rejected and the user is prompted again.
 
-The parsed result is stored separately as `target`.
+### CIDR Network Handling
 
-This avoids repeatedly overwriting the original string input with different Python object types.
+Used Python's `ipaddress.ip_network()` with `strict=False` so that networks containing host bits can still be accepted and normalized.
 
----
-
-## 2. IPv4 and IPv6 Support
-
-Individual IPv4 and IPv6 addresses are supported through:
-
-```python
-ipaddress.ip_address()
-```
-
-### Test — IPv4
-
-**Input:**
-
-```text
-192.168.50.25
-```
-
-**Result:**
-
-```text
-[IPv4Address('192.168.50.25')]
-```
-
-### Test — IPv6
-
-**Input:**
-
-```text
-2001:db8::25
-```
-
-**Result:**
-
-```text
-[IPv6Address('2001:db8::25')]
-```
-
-Both returned a single correctly parsed IP address.
-
----
-
-## 3. CIDR Network Handling
-
-CIDR targets are parsed using:
-
-```python
-ipaddress.ip_network(raw_target, strict=False)
-```
-
-Using `strict=False` allows the user to provide host bits alongside the network prefix.
-
-### Test — CIDR with Host Bits
-
-**Input:**
+For example:
 
 ```text
 192.168.50.25/24
 ```
 
-**Normalised network:**
+is normalized to:
 
 ```text
 192.168.50.0/24
 ```
 
-This confirmed that the target is automatically normalised to the correct network address.
+### Target Expansion
 
-### Test — IPv4 `/30`
+Implemented `expand_target()` to convert validated targets into individual IP addresses.
 
-**Input:**
+Individual IP addresses are returned directly, while networks are expanded using `.hosts()`.
 
-```text
-192.168.50.0/30
-```
+This also means network and broadcast addresses are excluded from IPv4 network scans.
 
-**Expanded hosts:**
+### IP Range Parsing
 
-```text
-IPv4Address('192.168.50.1')
-IPv4Address('192.168.50.2')
-```
-
-The network address `.0` and broadcast address `.3` were excluded by `.hosts()`.
-
-### Test — IPv6 `/126`
-
-An IPv6 `/126` network was also successfully expanded, confirming that network expansion works with IPv6 targets.
-
----
-
-## 4. IP Range Support
-
-Added support for targets in the format:
-
-```text
-START-END
-```
-
-`parse_target()` now:
-
-* Checks that the range contains `-`.
-* Splits the start and end addresses.
-* Validates both addresses.
-* Checks that both addresses use the same IP version.
-* Checks that the starting address is not greater than the ending address.
-* Generates the addresses lazily.
-
-### Test — IPv4 Range
-
-**Input:**
+Implemented `parse_target()` to support targets in the format:
 
 ```text
 192.168.50.10-192.168.50.13
 ```
 
-**Result:**
+The function validates both addresses, ensures they use the same IP version, checks that the starting address is not greater than the ending address, and generates the addresses within the range.
 
-```text
-IPv4Address('192.168.50.10')
-IPv4Address('192.168.50.11')
-IPv4Address('192.168.50.12')
-IPv4Address('192.168.50.13')
-```
+### Lazy Address Generation
 
-The range successfully generated all four addresses.
+Changed range generation to use a generator expression rather than constructing a complete list immediately.
 
-### Test — IPv6 Range
+This allows NetRecon to handle larger targets without unnecessarily storing every address in memory at once.
 
-An IPv6 address range was tested successfully, confirming that the range parser works with IPv6 as well as IPv4.
+## Bug Discovered and Fixed
 
----
+During testing, a mixed IPv4/IPv6 range was discovered to cause an unexpected traceback.
 
-## 5. Lazy Target Expansion
-
-A major improvement was made to prevent large target ranges from being eagerly expanded into lists.
-
-Initially, target expansion could create a complete list of addresses in memory. This would be particularly problematic for very large IPv6 networks.
-
-For example, an IPv6 `/64` contains:
-
-```text
-18,446,744,073,709,551,616 addresses
-```
-
-The implementation was changed to use generators so that addresses are produced only when needed.
-
-`expand_target()` now yields individual addresses rather than constructing the complete target set in memory.
-
-`parse_target()` ultimately returns a generator expression:
-
-```python
-return (ipaddress.ip_address(ip) for ip in range(int(start), int(end) + 1))
-```
-
-This allows the range to remain lazy while still allowing validation to happen immediately.
-
----
-
-## 6. Generator Bug Discovered and Fixed
-
-During edge-case testing, the following invalid target was used:
+The test:
 
 ```text
 192.168.50.10-2001:db8::10
 ```
 
-The expected behaviour was for the target to be rejected because it mixes IPv4 and IPv6 addresses.
+should be rejected because the two addresses use different IP versions.
 
-Initially, `parse_target()` used `yield`.
+The issue was caused by using `yield` inside `parse_target()`. Because a function containing `yield` becomes a generator function, the validation code was not executed when `parse_target()` was called. It was deferred until the generator was later iterated.
 
-This caused an unexpected traceback:
+This was fixed by removing `yield` from `parse_target()` and returning a generator expression instead.
 
-```text
-Traceback (most recent call last):
-  File "...target.py", line 58, in <module>
-    print(list(expand_target(get_target())))
-  File "...target.py", line 32, in expand_target
-    for ip in target:
-  File "...target.py", line 50, in parse_target
-    raise ValueError()
-ValueError
-```
+This allowed validation to happen immediately while still keeping address generation lazy.
 
-### Cause
+## Testing Completed
 
-Because `parse_target()` contained `yield`, the entire function became a generator.
+| Test                            | Result |
+| ------------------------------- | ------ |
+| Individual IPv4 address         | Passed |
+| Individual IPv6 address         | Passed |
+| IPv4 CIDR with host bits        | Passed |
+| IPv4 `/30` network expansion    | Passed |
+| IPv6 `/126` network expansion   | Passed |
+| IPv4 address range              | Passed |
+| IPv6 address range              | Passed |
+| Mixed IPv4/IPv6 range rejection | Passed |
+| Invalid target handling         | Passed |
 
-Therefore, the validation code did not actually execute when:
-
-```python
-parse_target(raw_target)
-```
-
-was called.
-
-The `ValueError` occurred later when `expand_target()` iterated over the generator, meaning the `try/except` in `get_target()` could not catch it.
-
-### Fix
-
-Removed `yield` from `parse_target()` and changed the final generation step to a generator expression returned with `return`.
-
-This separated the two behaviours:
+Example successful IPv4 range:
 
 ```text
-Validation
-    ↓
-happens immediately
+Input:
+192.168.50.10-192.168.50.13
 
-Generator creation
-    ↓
-returned after validation
-
-Address generation
-    ↓
-happens only when iterated
+Output:
+192.168.50.10
+192.168.50.11
+192.168.50.12
+192.168.50.13
 ```
 
-The same invalid target was then tested again.
+## Code Quality
 
-### Retest
+Added type hints using `Iterator` for the target expansion and range parsing functions.
 
-**Input:**
+Added docstrings to explain the purpose of the main functions.
+
+The module remains focused specifically on target handling so that later scanner components can use the output without needing to understand how the original target was entered.
+
+## Git and GitHub
+
+Completed the target module and committed the changes locally.
+
+The local repository and GitHub repository initially diverged because GitHub contained a commit that was not present locally.
+
+Used:
 
 ```text
-192.168.50.10-2001:db8::10
-```
-
-**Result:**
-
-```text
-Invalid target: Enter an IP address, CIDR network, or IP range
-```
-
-The program returned to the input prompt instead of crashing.
-
-This confirmed the bug was fixed.
-
----
-
-## 7. Code Quality Improvements
-
-Completed the following cleanup:
-
-* Added type hints to generator-returning functions.
-* Added function docstrings.
-* Added explanatory comments.
-* Removed the redundant `valid_target` state.
-* Simplified the validation flow using early `return` statements.
-* Separated `raw_target` from the parsed `target`.
-* Standardised `raise ValueError()` usage.
-* Kept target generation lazy to improve scalability.
-
----
-
-## 8. Git and GitHub
-
-After completing and testing `target.py`, Git reported:
-
-```text
-modified: scanner/target.py
-```
-
-The file was staged with:
-
-```bash
-git add scanner/target.py
-```
-
-It was then committed as:
-
-```text
-Complete target parsing module
-```
-
-### Remote Repository Issue
-
-The first push was rejected because GitHub contained a commit that was not present locally:
-
-```text
-! [rejected] main -> main (fetch first)
-```
-
-The remote changes were retrieved using:
-
-```bash
 git fetch origin
-```
-
-Git then reported that the branches had diverged:
-
-```text
-Your branch and 'origin/main' have diverged,
-and have 1 and 1 different commits each, respectively.
-```
-
-The remote commit was integrated using:
-
-```bash
 git rebase origin/main
+git push
 ```
 
-The rebase completed successfully:
+The rebase completed successfully with no conflicts, and the completed `target.py` module was successfully pushed to GitHub.
+
+Final pushed commit:
 
 ```text
-Successfully rebased and updated refs/heads/main.
+3eb54d0 Complete target parsing module
 ```
 
-The completed module was then successfully pushed:
+## Final Status
 
-```text
-f15c320..3eb54d0  main -> main
-```
+`scanner/target.py` is complete and tested.
 
-### Final Git Status
-
-The completed `target.py` implementation is now present on GitHub and the local repository has been synchronised with the remote repository.
-
-**Final remote commit:** `3eb54d0`
-
----
-
-## Final Module Status
-
-`scanner/target.py` is now considered **complete**.
-
-### Supported Targets
-
-| Target Type             | Status                        |
-| ----------------------- | ----------------------------- |
-| IPv4 address            | ✅ Tested                      |
-| IPv6 address            | ✅ Tested                      |
-| IPv4 CIDR               | ✅ Tested                      |
-| IPv6 CIDR               | ✅ Tested                      |
-| IPv4 range              | ✅ Tested                      |
-| IPv6 range              | ✅ Tested                      |
-| Mixed IPv4/IPv6 range   | ✅ Correctly rejected          |
-| Invalid input           | ✅ Correctly rejected          |
-| Large target generation | ✅ Lazy generation implemented |
-
----
+NetRecon can now accept multiple target formats and normalize them into individual IP addresses for future scanning components.
 
 ## Key Learning Outcomes
 
-This session provided practical experience with:
+* Python's `ipaddress` module
+* IPv4 vs IPv6 handling
+* CIDR networks
+* `strict=False`
+* Network and broadcast address handling
+* Python generators
+* Lazy evaluation
+* Generator expressions
+* Function type hints
+* Docstrings
+* Exception handling
+* Git rebase and resolving repository divergence
+* Designing modules around a single responsibility
 
-* Python's `ipaddress` module.
-* IPv4 vs IPv6 handling.
-* CIDR notation and network normalisation.
-* `strict=False`.
-* Generators and lazy evaluation.
-* `yield` versus `return`.
-* Generator expressions.
-* Exception handling with generators.
-* Type hints.
-* Function docstrings.
-* Git staging and commits.
-* Git fetch/rebase workflow.
-* Resolving divergent local and remote Git histories.
+## Next Step
 
----
-
-## Next Session
-
-Begin development of the next NetRecon scanner component while maintaining the same approach:
-
-1. Design the module.
-2. Understand the required Python concepts.
-3. Implement incrementally.
-4. Test individual behaviours and edge cases.
-5. Document the completed functionality.
-6. Commit and push the completed module.
+Begin the next NetRecon scanner component after `target.py`, building on the normalized targets produced by this module.
