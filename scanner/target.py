@@ -1,57 +1,55 @@
 
-import ipaddress    
+import ipaddress   
+from typing import Iterator 
 
-
+#Gets target input then validates it by attempting to turn it into a IP address IP network or an IP range
 def get_target():
-    valid_target=False
-    while valid_target==False:
-        target=input("Enter target: ").strip()
+    while True:
+        raw_target=input("Enter target: ").strip()
         try:
-            target=ipaddress.ip_address(target)
-            valid_target=True
+            target=ipaddress.ip_address(raw_target)
             return target
         except ValueError:
             try:
-                target=ipaddress.ip_network(target)
-                valid_target=True
+                target=ipaddress.ip_network(raw_target, strict=False)
                 return target
             except ValueError:
                 try:
-                    target_range=parse_target(target)
+                    target_range=parse_target(raw_target)
                     return target_range
                 except ValueError:
-                    print("enter a valid target")
+                    print("Invalid Target: Enter an IP address, CIDR network, or IP range")
                   
 
-def expand_target(target):
+def expand_target(target)-> Iterator[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+    """Expands a validated target into individual IP addresses for scanning."""
     if isinstance(target, (ipaddress.IPv4Address, ipaddress.IPv6Address)):
-        return [target]
+        yield target
     elif isinstance(target, (ipaddress.IPv4Network, ipaddress.IPv6Network)):
-        return list(target)
-    elif isinstance(target, list):
-        return target
+        for ip in target.hosts():
+            yield ip
+    elif hasattr(target, "__iter__"):
+        for ip in target:
+            yield ip
     else:
-         raise ValueError
-ipaddress.i
+         raise ValueError("unsupported target type")
 
-def parse_target(target):
+
+def parse_target(target: str)->Iterator[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+    """Parses an IP range and generates each address within the specified range."""
     if "-" not in target:
         raise ValueError()
     parts=target.split("-")
-    ips=[]
+    if len(parts)!=2:
+        raise ValueError()
     start=parts[0].strip()
     end=parts[1].strip()
     start=ipaddress.ip_address(start)
     end=ipaddress.ip_address(end)
-    if len(parts)!=2:
-        raise ValueError
     if start.version != end.version:
-        raise ValueError
+        raise ValueError()
     if start>end:
-        raise ValueError
-    for ip in range(int(start), int(end)+1):
-        current_ip=ipaddress.ip_address(ip)
-        ips.append(current_ip)
-    return ips
+        raise ValueError()
+    return (ipaddress.ip_address(ip) for ip in range(int(start), int(end) + 1))
 
-get_target()
+print(list(expand_target(get_target())))
